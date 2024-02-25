@@ -28,6 +28,7 @@ func (tp *transport) sendMSG() {
 		state:     make(chan txState),
 		event:     make(chan txEvent),
 		currState: Idle,
+		timerChan: make(chan time.Time),
 	}
 
 	go tp.cli.run()
@@ -38,6 +39,8 @@ type client struct {
 	state     chan txState
 	event     chan txEvent
 	currState txState
+	timerChan <-chan time.Time
+	timer     *time.Timer
 }
 
 func (c *client) run() {
@@ -45,22 +48,31 @@ func (c *client) run() {
 		select {
 		case state := <-c.state:
 			c.currState = state
+		case <-c.timerChan:
+			go func() {
+				c.event <- Timeout
+			}()
 		case event := <-c.event:
 			switch c.currState {
 			case Idle:
-				c.Idle(event)
+				go c.Idle(event)
 			case SendData:
-				c.SendData(event)
+				go c.SendData(event)
 			}
 		}
 	}
 }
 
+func (c *client) startTimer() {
+	c.timer = time.NewTimer(2 * time.Second)
+	c.timerChan = c.timer.C
+}
+
 func (c *client) Idle(ev txEvent) {
 	fmt.Printf("Idle state: %d\n", ev)
+	c.startTimer()
 	c.state <- SendData
-	time.Sleep(2 * time.Second)
-	c.event <- Timeout
+	fmt.Println("state changed to sending data")
 }
 
 func (c *client) SendData(ev txEvent) {
@@ -72,5 +84,5 @@ func main() {
 	go tp.sendMSG()
 
 	var input string
-	fmt.Scan(&input)
+	fmt.Scanln(&input)
 }
